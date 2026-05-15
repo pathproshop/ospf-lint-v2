@@ -29,3 +29,6 @@ netmiko.log
 
 # Output files
 *.csv
+
+# Temp
+*lock*
