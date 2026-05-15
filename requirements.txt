@@ -1,0 +1,8 @@
+# OSPF Lint dependencies
+netmiko>=4.0.0
+paramiko==3.5.1
+click>=8.0.0
+python-dotenv>=1.0.0
+
+# Development/testing
+pytest>=7.0.0

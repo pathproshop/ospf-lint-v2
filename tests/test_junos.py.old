@@ -1,0 +1,215 @@
+"""
+Unit tests for Juniper Junos parser.
+
+Test data is based on real device outputs.
+"""
+
+import pytest
+from parsers.junos import JunosParser
+
+
+# =============================================================================
+# SAMPLE OUTPUTS (from real devices)
+# =============================================================================
+
+SAMPLE_OSPF_OUTPUT = """
+ae0.4, State Full, Area 0.0.0.0
+  Type: P2P, Address: 66.181.248.0, Mask: 255.255.255.254, MTU: 9170, Cost: 1
+  Adj count: 1
+  Hello: 10, Dead: 40, ReXmit: 5, Not Stub
+  Auth type: None
+  Protection type: None
+  Topology default (ID 0) -> Cost: 1
+ae3.4, State Full, Area 0.0.0.0
+  Type: P2P, Address: 66.181.248.16, Mask: 255.255.255.254, MTU: 9170, Cost: 50
+  Adj count: 1
+  Hello: 10, Dead: 40, ReXmit: 5, Not Stub
+  Auth type: None
+  Protection type: None
+  Topology default (ID 0) -> Cost: 50
+lo0.0, State Full, Area 0.0.0.0
+  Type: Loopback, Address: 66.181.248.100, Mask: 255.255.255.255, MTU: 65535, Cost: 0
+  Adj count: 0
+ge-0/0/5.0, State Full, Area 0.0.0.0
+  Type: P2P, Address: 66.181.248.10, Mask: 255.255.255.254, MTU: 9178, Cost: 65535
+  Adj count: 1
+  Passive
+"""
+
+SAMPLE_DESC_OUTPUT = """
+Interface       Admin Link Description
+ae0             up    up   type=core,subtype=local,peer=lga1er02,peerint=ae0.4
+ae3             up    up   type=core,subtype=longhaul,peer=dfw1er01,peerint=ae5.4
+lo0             up    up   
+ge-0/0/5        up    up   type=core,subtype=local,cid=cir0000014,peer=dfw1rr01,peerint=em0
+"""
+
+SAMPLE_PING_OUTPUT = """
+PING 66.181.248.1 (66.181.248.1): 56 data bytes
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+--- 66.181.248.1 ping statistics ---
+100 packets transmitted, 100 packets received, 0% packet loss
+round-trip min/avg/max/stddev = 1.187/1.860/7.647/0.689 ms
+"""
+
+SAMPLE_PING_OUTPUT_SUB_MS = """
+PING 66.181.248.5 (66.181.248.5): 56 data bytes
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+--- 66.181.248.5 ping statistics ---
+100 packets transmitted, 100 packets received, 0% packet loss
+round-trip min/avg/max/stddev = 0.416/0.523/1.234/0.089 ms
+"""
+
+
+# =============================================================================
+# PARSER ATTRIBUTE TESTS
+# =============================================================================
+
+class TestJunosParserAttributes:
+    """Test parser class attributes."""
+    
+    def test_device_type(self):
+        assert JunosParser.device_type == 'juniper_junos'
+    
+    def test_ospf_commands(self):
+        assert 'show ospf interface detail' in JunosParser.ospf_commands
+        assert 'show interfaces descriptions' in JunosParser.ospf_commands
+    
+    def test_ping_command_template(self):
+        assert JunosParser.ping_command_template is not None
+        assert '{dest}' in JunosParser.ping_command_template
+        assert '{src}' in JunosParser.ping_command_template
+        assert 'rapid' in JunosParser.ping_command_template
+
+
+# =============================================================================
+# OSPF PARSING TESTS
+# =============================================================================
+
+class TestJunosParseOSPF:
+    """Test OSPF output parsing."""
+    
+    def test_parse_ospf_returns_list(self):
+        results = JunosParser.parse_ospf('testhost', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        assert isinstance(results, list)
+    
+    def test_parse_ospf_correct_count(self):
+        """Should return 2 interfaces (ae0.4, ae3.4) - excludes loopback and passive."""
+        results = JunosParser.parse_ospf('testhost', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        # ae0.4, ae3.4 - lo0.0 excluded (loopback), ge-0/0/5.0 excluded (passive)
+        assert len(results) == 2
+    
+    def test_parse_ospf_interface_fields(self):
+        results = JunosParser.parse_ospf('lga1er01', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        
+        # Find ae0.4
+        ae0 = next((r for r in results if r['interface'] == 'ae0.4'), None)
+        assert ae0 is not None
+        assert ae0['host'] == 'lga1er01'
+        assert ae0['ip'] == '66.181.248.0'
+        assert ae0['mask'] == '255.255.255.254'
+        assert ae0['mtu'] == '9170'
+        assert ae0['cost'] == '1'
+    
+    def test_parse_ospf_description_lookup(self):
+        """Should match description from parent interface (ae0 -> ae0.4)."""
+        results = JunosParser.parse_ospf('lga1er01', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        
+        ae0 = next((r for r in results if r['interface'] == 'ae0.4'), None)
+        assert ae0 is not None
+        assert 'type=core' in ae0['description']
+        assert 'peer=lga1er02' in ae0['description']
+    
+    def test_parse_ospf_excludes_loopback(self):
+        results = JunosParser.parse_ospf('testhost', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        interfaces = [r['interface'] for r in results]
+        assert 'lo0.0' not in interfaces
+    
+    def test_parse_ospf_excludes_passive(self):
+        """Passive interfaces should be excluded."""
+        results = JunosParser.parse_ospf('testhost', {
+            'show ospf interface detail': SAMPLE_OSPF_OUTPUT,
+            'show interfaces descriptions': SAMPLE_DESC_OUTPUT,
+        })
+        interfaces = [r['interface'] for r in results]
+        # ge-0/0/5.0 is marked Passive in sample
+        assert 'ge-0/0/5.0' not in interfaces
+    
+    def test_parse_ospf_empty_inputs(self):
+        results = JunosParser.parse_ospf('testhost', {
+            'show ospf interface detail': '',
+            'show interfaces descriptions': '',
+        })
+        assert results == []
+    
+    def test_parse_ospf_missing_inputs(self):
+        results = JunosParser.parse_ospf('testhost', {})
+        assert results == []
+
+
+# =============================================================================
+# PING PARSING TESTS
+# =============================================================================
+
+class TestJunosParsePing:
+    """Test ping output parsing."""
+    
+    def test_parse_ping_extracts_min_rtt(self):
+        result = JunosParser.parse_ping(SAMPLE_PING_OUTPUT)
+        assert result == '1'  # 1.187 rounded to 1
+    
+    def test_parse_ping_rounds_to_integer(self):
+        """Sub-millisecond values should round to integer."""
+        result = JunosParser.parse_ping(SAMPLE_PING_OUTPUT_SUB_MS)
+        assert result == '0'  # 0.416 rounds to 0
+    
+    def test_parse_ping_invalid_output(self):
+        result = JunosParser.parse_ping("some garbage output")
+        assert result is None
+    
+    def test_parse_ping_empty_output(self):
+        result = JunosParser.parse_ping("")
+        assert result is None
+    
+    def test_parse_ping_timeout_output(self):
+        timeout_output = """
+PING 10.0.0.1 (10.0.0.1): 56 data bytes
+.....
+--- 10.0.0.1 ping statistics ---
+5 packets transmitted, 0 packets received, 100% packet loss
+"""
+        result = JunosParser.parse_ping(timeout_output)
+        assert result is None
+
+
+# =============================================================================
+# PING COMMAND BUILDER TESTS
+# =============================================================================
+
+class TestJunosBuildPingCommand:
+    """Test ping command generation."""
+    
+    def test_build_ping_command(self):
+        cmd = JunosParser.build_ping_command('10.0.0.1', '10.0.0.2')
+        assert cmd == 'ping 10.0.0.1 source 10.0.0.2 rapid count 100'
+    
+    def test_build_ping_command_format(self):
+        cmd = JunosParser.build_ping_command('192.168.1.1', '192.168.1.2')
+        assert '192.168.1.1' in cmd
+        assert '192.168.1.2' in cmd
+        assert 'rapid' in cmd

@@ -1,0 +1,15 @@
+lga1er01,juniper_junos
+lga1er02,juniper_junos
+iad1er01,juniper_junos
+iad1er02,juniper_junos
+iad1rr01,juniper_junos
+atl1er01,juniper_junos
+dfw1er01,juniper_junos
+dfw1er02,juniper_junos
+dfw1rr01,juniper_junos
+cr1-iad5,cisco_xr
+cr2-iad5,cisco_xr
+cr1-dfw2,cisco_xr
+cr2-dfw2,cisco_xr
+er1-iah1,cisco_ios
+cr1.lga2,brocade_fastiron
