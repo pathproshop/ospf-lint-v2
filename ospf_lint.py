@@ -555,6 +555,12 @@ def end_execution(pid, starttime=None):
 def main():
     """Main program entry point."""
     import click
+    from importlib.metadata import version, PackageNotFoundError
+
+    try:
+        __version__ = version("ospf-lint")
+    except PackageNotFoundError:
+        __version__ = "unknown"
     
     @click.command()
     @click.option('-d', '--devices', help="Comma-separated list of devices", default=None)
@@ -567,6 +573,7 @@ def main():
     @click.option('--ping-only', help="Run ping only using existing pairs CSV file")
     @click.option('--debug', is_flag=True, help="Enable debug output for ping parsing")
     @click.option('--list-platforms', is_flag=True, help="List supported platforms and exit")
+    @click.version_option(version=__version__, prog_name="ospf-lint")
     def cli(devices, device_file, threads, device_type, login_user, env_file, skip_ping, ping_only, debug, list_platforms):
         """
         OSPF Lint - OSPF Interface Metrics Collection Tool
