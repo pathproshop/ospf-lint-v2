@@ -24,7 +24,7 @@ Collects OSPF interface information from network devices, pairs interfaces by su
 
 ```bash
 # Clone the repository
-git clone https://github.com/pathproshop/ospf-lint.git
+git clone https://github.com/pathproshop/ospf-lint-v2.git
 cd ospf-lint
 
 # Install in a virtual environment (recommended)
